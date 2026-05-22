@@ -1,49 +1,21 @@
 # Changelog
 
-## [Unreleased]
-
-### Changed
-
-- **Go:** `ShortPositionsResponse.Data` changed from `json.RawMessage` to `[]*ShortPositionsItem` — typed struct with unified US+HK fields; `timestamp` converted to RFC 3339.
-- **Go:** `ShortTradesResponse.Data` changed from `json.RawMessage` to `[]*ShortTradesItem` — typed struct with unified US+HK fields; `timestamp` converted to RFC 3339.
-- **Go:** `RankListResponse` changed from `{Data json.RawMessage}` to `{Bmp bool, Lists []*RankListItem}` — `counter_id` converted to symbol.
-- **Go:** `TopMoversResponse` changed from `{Data json.RawMessage}` to `{Events []*TopMoversEvent, NextParams json.RawMessage}` — `counter_id` converted to symbol, `timestamp` converted to RFC 3339.
-- **Go:** `ValuationComparisonResponse` changed from `{Data json.RawMessage}` to `{List []*ValuationComparisonItem}` — `counter_id` converted to symbol, history `date` converted to RFC 3339.
+## [v4.2.0] - 2026-05-22
 
 ### Added
 
-- **Go:** Six new `FundamentalContext` methods (merged from PR #91):
-  - `BusinessSegments` — GET `/v1/quote/fundamentals/business-segments`
-  - `BusinessSegmentsHistory` — GET `/v1/quote/fundamentals/business-segments/history`
-  - `InstitutionRatingViews` — GET `/v1/quote/ratings/institutional`
-  - `IndustryRank` — GET `/v1/quote/industry/rank`
-  - `IndustryPeers` — GET `/v1/quote/industries/peers`
-  - `FinancialReportSnapshot` — GET `/v1/quote/financials/earnings-snapshot`
+- 19 new APIs (same as openapi v4.2.0): `FundamentalContext` +9, `QuoteContext` +1, `MarketContext` +3, new `screener` package +5 — see PR [#91](https://github.com/longbridge/openapi-go/pull/91), [#92](https://github.com/longbridge/openapi-go/pull/92)
 
-- **Go:** New `screener` package with `ScreenerContext` (5 methods):
-  - `ScreenerRecommendStrategies` — GET `/v1/quote/screener/strategies/recommend`
-  - `ScreenerUserStrategies` — GET `/v1/quote/screener/strategies/mine`
-  - `ScreenerStrategy` — GET `/v1/quote/screener/strategy`
-  - `ScreenerSearch` — POST `/v1/quote/screener/search`
-  - `ScreenerIndicators` — GET `/v1/quote/screener/indicators`
+### Changed
 
-- **Go:** Three new `FundamentalContext` methods:
-  - `ShareholderTop` — GET `/v1/quote/shareholders/top`
-  - `ShareholderDetail` — GET `/v1/quote/shareholders/holding`
-  - `ValuationComparison` — GET `/v1/quote/compare/valuation`
-
-- **Go:** Two new `QuoteContext` methods:
-  - `ShortPositions(ctx, symbol, count)` — GET `/v1/quote/short-positions/hk` or `/v1/quote/short-positions/us` (auto-detected from symbol suffix): short interest / position data for HK or US securities.
-  - `ShortTrades` — GET `/v1/quote/short-trades/hk` or `/v1/quote/short-trades/us` (auto-detected by `.HK`/`.US` suffix): short trade records.
-
-- **Go:** Three new `MarketContext` methods:
-  - `TopMovers` — POST `/v1/quote/market/stock-events`: top movers (stocks with unusual price movements) filtered by market codes, sort order, optional date, and limit.
-  - `RankCategories` — GET `/v1/quote/market/rank/categories`: available rank category keys.
-  - `RankList` — GET `/v1/quote/market/rank/list`: ranked stock list for a given rank key.
+- `ShortPositions`/`ShortTrades`: typed structs, unified US+HK, RFC 3339 timestamps
+- `TopMovers`, `RankList`, `ValuationComparison`: typed structs, `counter_id` → symbol, RFC 3339 timestamps
 
 ### Breaking changes
 
-- **Go:** `MarketContext.StockEvents` renamed to `TopMovers`; `StockEventsResponse` renamed to `TopMoversResponse`.
+- `StockEvents` → `TopMovers`; `StockEventsResponse` → `TopMoversResponse`
+- `HkShortPositions` removed; use `ShortPositions(ctx, symbol, count)`
+- Response types for `ShortPositions`, `ShortTrades`, `TopMovers`, `RankList`, `ValuationComparison` changed from raw JSON to typed structs
 
 ## [v4.1.0] - 2026-05-14
 
