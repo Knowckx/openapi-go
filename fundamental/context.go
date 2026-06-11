@@ -1612,57 +1612,55 @@ func convertFinancialReportSnapshot(j *jsontypes.FinancialReportSnapshot) *Finan
 	}
 }
 
-// ─── Macrodata ────────────────────────────────────────────────────
+// ─── Macroeconomic ────────────────────────────────────────────────────
 
-// MacrodataIndicators fetches the list of available macroeconomic indicators.
+// MacroeconomicIndicators fetches the list of available macroeconomic indicators.
 //
-// Pass offset and limit as nil to use the API defaults (offset=0, limit=100).
-// To fetch all ~619 indicators in one call pass limit=1000.
+// Pass country to filter by country code (e.g. MacroeconomicCountryUS).
+// Pass nil for all countries.
 //
 // Path: GET /v1/quote/macrodata
-func (c *FundamentalContext) MacrodataIndicators(
+func (c *FundamentalContext) MacroeconomicIndicators(
 	ctx context.Context,
+	country *MacroeconomicCountry,
 	offset *int32,
 	limit *int32,
-) ([]MacrodataIndicator, error) {
+) (*MacroeconomicIndicatorListResponse, error) {
 	q := url.Values{}
+	if country != nil {
+		q.Set("country", macroeconomicCountryToAPIValue(*country))
+	}
 	if offset != nil {
 		q.Set("offset", fmt.Sprintf("%d", *offset))
 	}
 	if limit != nil {
 		q.Set("limit", fmt.Sprintf("%d", *limit))
 	}
-	var resp jsontypes.MacrodataIndicatorListResponse
+	var resp jsontypes.MacroeconomicIndicatorListResponse
 	if err := c.httpClient.Get(ctx, "/v1/quote/macrodata", q, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]MacrodataIndicator, 0, len(resp.Data))
+	out := make([]MacroeconomicIndicator, 0, len(resp.Data))
 	for _, item := range resp.Data {
-		out = append(out, convertMacrodataIndicator(&item))
+		out = append(out, convertMacroeconomicIndicator(&item))
 	}
-	return out, nil
+	return &MacroeconomicIndicatorListResponse{Data: out, Count: resp.Count}, nil
 }
 
-// Macrodata fetches historical data for a specific macroeconomic
-// indicator.
-//
-// startTime and endTime are Unix timestamps in seconds; pass nil to omit.
-// limit defaults to 100 (max 100) when nil.
-//
-// Path: GET /v1/quote/macrodata/{indicator_code}
-// Macrodata fetches historical data for a specific macroeconomic indicator.
+// Macroeconomic fetches historical data for a specific macroeconomic indicator.
 //
 // startDate and endDate are date strings in "YYYY-MM-DD" format.
 // startDate is sent as YYYY-MM-DDT00:00:00Z; endDate is sent as YYYY-MM-DDT23:59:59Z.
 //
 // Path: GET /v1/quote/macrodata/{indicator_code}
-func (c *FundamentalContext) Macrodata(
+func (c *FundamentalContext) Macroeconomic(
 	ctx context.Context,
 	indicatorCode string,
 	startDate *string,
 	endDate *string,
+	offset *int32,
 	limit *int32,
-) (*MacrodataResponse, error) {
+) (*MacroeconomicResponse, error) {
 	q := url.Values{}
 	if startDate != nil {
 		q.Set("start_time", *startDate+"T00:00:00Z")
@@ -1670,21 +1668,25 @@ func (c *FundamentalContext) Macrodata(
 	if endDate != nil {
 		q.Set("end_time", *endDate+"T23:59:59Z")
 	}
+	if offset != nil {
+		q.Set("offset", fmt.Sprintf("%d", *offset))
+	}
 	if limit != nil {
 		q.Set("limit", fmt.Sprintf("%d", *limit))
 	}
-	var resp jsontypes.MacrodataResponse
+	var resp jsontypes.MacroeconomicResponse
 	path := "/v1/quote/macrodata/" + indicatorCode
 	if err := c.httpClient.Get(ctx, path, q, &resp); err != nil {
 		return nil, err
 	}
-	data := make([]Macrodata, 0, len(resp.Data))
+	data := make([]Macroeconomic, 0, len(resp.Data))
 	for _, d := range resp.Data {
-		data = append(data, convertMacrodata(&d))
+		data = append(data, convertMacroeconomic(&d))
 	}
-	return &MacrodataResponse{
-		Info: convertMacrodataIndicator(&resp.Info),
-		Data: data,
+	return &MacroeconomicResponse{
+		Info:  convertMacroeconomicIndicator(&resp.Info),
+		Data:  data,
+		Count: resp.Count,
 	}, nil
 }
 
@@ -1708,8 +1710,8 @@ func parseOptionalRFC3339(s string) *time.Time {
 	return &t
 }
 
-func convertMacrodataIndicator(j *jsontypes.MacrodataIndicator) MacrodataIndicator {
-	return MacrodataIndicator{
+func convertMacroeconomicIndicator(j *jsontypes.MacroeconomicIndicator) MacroeconomicIndicator {
+	return MacroeconomicIndicator{
 		IndicatorCode:    j.IndicatorCode,
 		SourceOrg:        j.SourceOrg,
 		Country:          j.Country,
@@ -1723,8 +1725,8 @@ func convertMacrodataIndicator(j *jsontypes.MacrodataIndicator) MacrodataIndicat
 	}
 }
 
-func convertMacrodata(j *jsontypes.Macrodata) Macrodata {
-	return Macrodata{
+func convertMacroeconomic(j *jsontypes.Macroeconomic) Macroeconomic {
+	return Macroeconomic{
 		Period:        j.Period,
 		ReleaseAt:     parseOptionalRFC3339(j.ReleaseAt),
 		ActualValue:   j.ActualValue,
@@ -1734,5 +1736,24 @@ func convertMacrodata(j *jsontypes.Macrodata) Macrodata {
 		NextReleaseAt: parseOptionalRFC3339(j.NextReleaseAt),
 		Unit:          convertMultiLanguageText(j.Unit),
 		UnitPrefix:    convertMultiLanguageText(j.UnitPrefix),
+	}
+}
+
+func macroeconomicCountryToAPIValue(c MacroeconomicCountry) string {
+	switch c {
+	case MacroeconomicCountryHK:
+		return "Hong Kong SAR China"
+	case MacroeconomicCountryCN:
+		return "China (Mainland)"
+	case MacroeconomicCountryUS:
+		return "United States"
+	case MacroeconomicCountryEU:
+		return "Euro Zone"
+	case MacroeconomicCountryJP:
+		return "Japan"
+	case MacroeconomicCountrySG:
+		return "Singapore"
+	default:
+		return string(c)
 	}
 }
