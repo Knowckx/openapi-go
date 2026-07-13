@@ -60,6 +60,38 @@ func WithBody(v interface{}) RequestOption {
 	}
 }
 
+// region returns the data center region derived from the client's credentials.
+func (c *Client) region() dcRegion {
+	if c.opts.OAuthClient != nil {
+		// OAuth token inspection is async; cannot determine synchronously.
+		// Default to AP (the gateway default) so AP-only guards don't fire.
+		return dcRegionAp
+	}
+	return dcRegionFromCredentials(c.opts.AppKey, c.opts.AppSecret, c.opts.AccessToken)
+}
+
+// IsUS reports whether the configured credentials belong to the US data center.
+func (c *Client) IsUS() bool {
+	return c.region() == dcRegionUs
+}
+
+// CheckRegion verifies that the current session's region matches required.
+// Returns *RegionRestrictedError if it does not; nil otherwise.
+// required must be "US" or "AP".
+func (c *Client) CheckRegion(path, required string) error {
+	var req dcRegion
+	if required == "US" {
+		req = dcRegionUs
+	} else {
+		req = dcRegionAp
+	}
+	cur := c.region()
+	if cur.allows(req) {
+		return nil
+	}
+	return &RegionRestrictedError{Path: path, Required: req.display(), Current: cur.display()}
+}
+
 // Get sends Get request with queryParams
 func (c *Client) Get(ctx context.Context, path string, queryParams url.Values, resp interface{}, ropts ...RequestOption) error {
 	return c.Call(ctx, "GET", path, queryParams, nil, resp, ropts...)
@@ -144,13 +176,13 @@ func (c *Client) Call(ctx context.Context, method, path string, queryParams inte
 		// then strip the prefix so only the bare token is sent to the gateway.
 		region = dcRegionFromCredential(token)
 		appKey = c.opts.OAuthClient.ClientID()
-		accessToken = "Bearer " + stripRegionPrefix(token)
+		accessToken = "Bearer " + stripBearerPrefix(token)
 		appSecret = ""
 	} else {
 		// API-key auth: any of the three credentials may carry the region prefix.
 		region = dcRegionFromCredentials(appKey, appSecret, accessToken)
-		accessToken = stripRegionPrefix(accessToken)
-		appKey = stripRegionPrefix(appKey)
+		accessToken = stripBearerPrefix(accessToken)
+		appKey = stripBearerPrefix(appKey)
 	}
 
 	// set headers
