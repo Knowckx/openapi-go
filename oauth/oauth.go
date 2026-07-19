@@ -18,6 +18,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -29,13 +30,18 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// ErrReauthorizationRequired indicates that OAuth cannot recover without a new
+// authorization flow, for example because the refresh token is missing or has
+// been rejected by the authorization server.
+var ErrReauthorizationRequired = errors.New("oauth: reauthorization required")
+
 const (
-	authTimeout          = 5 * time.Minute
-	oauthBaseURL         = "https://openapi.longbridge.com"
-	oauthBaseURLStaging  = "https://openapi-global.longbridge.xyz"
-	defaultCallbackPort  = 60355
-	expiresSoonSecs      = 3600
-	tokenDir             = ".longbridge/openapi/tokens"
+	authTimeout         = 5 * time.Minute
+	oauthBaseURL        = "https://openapi.longbridge.com"
+	oauthBaseURLStaging = "https://openapi-global.longbridge.xyz"
+	defaultCallbackPort = 60355
+	expiresSoonSecs     = 3600
+	tokenDir            = ".longbridge/openapi/tokens"
 )
 
 // oauthToken is the internal token type (not exported).
@@ -124,25 +130,21 @@ func (o *OAuth) Build(ctx context.Context) error {
 		return nil
 	}
 	if loaded != nil && loaded.RefreshToken != "" {
-		o.mu.Unlock()
-		refreshed, err := o.refreshToken(ctx, loaded)
-		o.mu.Lock()
-		if err == nil {
-			_ = saveTokenToPath(path, refreshed)
-			o.token = refreshed
+		o.token = loaded
+		if err := o.refreshLocked(ctx); err == nil {
 			return nil
 		}
 	}
 
 	// No valid token: run authorization flow.
-	o.mu.Unlock()
 	tok, err := o.authorizeFlow(ctx)
-	o.mu.Lock()
 	if err != nil {
 		return err
 	}
 	o.token = tok
-	_ = saveTokenToPath(path, tok)
+	if err := saveTokenToPath(path, tok); err != nil {
+		return fmt.Errorf("oauth: persist token: %w", err)
+	}
 	return nil
 }
 
@@ -150,30 +152,35 @@ func (o *OAuth) Build(ctx context.Context) error {
 // The HTTP client calls this when OAuth is set on config.
 func (o *OAuth) AccessToken(ctx context.Context) (string, error) {
 	o.mu.Lock()
-	tok := o.token
-	needRefresh := tok == nil || tok.isExpired() || tok.expiresSoon()
-	if needRefresh && tok != nil && tok.RefreshToken != "" {
-		// Copy so we can refresh without holding the lock (network I/O).
-		tokCopy := *tok
-		o.mu.Unlock()
-		refreshed, err := o.refreshToken(ctx, &tokCopy)
-		if err != nil {
+	defer o.mu.Unlock()
+
+	if o.token == nil || o.token.isExpired() || o.token.expiresSoon() {
+		if err := o.refreshLocked(ctx); err != nil {
 			return "", err
 		}
-		o.mu.Lock()
-		o.token = refreshed
-		path, _ := o.tokenPath()
-		_ = saveTokenToPath(path, refreshed)
-		o.mu.Unlock()
-		return refreshed.AccessToken, nil
 	}
-	if needRefresh {
-		o.mu.Unlock()
-		return "", fmt.Errorf("oauth: no valid token; call Build(ctx) first or re-run authorization")
+	return o.token.AccessToken, nil
+}
+
+// Refresh forces an access-token refresh using the current refresh token. The
+// refreshed token is updated in memory and persisted before this method returns.
+func (o *OAuth) Refresh(ctx context.Context) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.refreshLocked(ctx)
+}
+
+// RefreshIfCurrent refreshes only when rejectedAccessToken is still current.
+// It prevents concurrent rejected requests from refreshing the same OAuth
+// session more than once. SDK transports use this for transparent recovery.
+func (o *OAuth) RefreshIfCurrent(ctx context.Context, rejectedAccessToken string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.token != nil && o.token.AccessToken != rejectedAccessToken {
+		return nil
 	}
-	accessToken := tok.AccessToken
-	o.mu.Unlock()
-	return accessToken, nil
+	return o.refreshLocked(ctx)
 }
 
 func (o *OAuth) tokenPath() (string, error) {
@@ -189,6 +196,11 @@ func (o *OAuth) refreshToken(ctx context.Context, tok *oauthToken) (*oauthToken,
 	src := cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: tok.RefreshToken})
 	t, err := src.Token()
 	if err != nil {
+		var retrieveErr *oauth2.RetrieveError
+		if errors.As(err, &retrieveErr) &&
+			(retrieveErr.ErrorCode == "invalid_grant" || retrieveErr.ErrorCode == "invalid_token") {
+			return nil, fmt.Errorf("oauth: refresh token rejected: %w", errors.Join(ErrReauthorizationRequired, err))
+		}
 		return nil, fmt.Errorf("oauth: refresh token: %w", err)
 	}
 	out := tokenFromOAuth2(t)
@@ -196,6 +208,28 @@ func (o *OAuth) refreshToken(ctx context.Context, tok *oauthToken) (*oauthToken,
 		out.RefreshToken = tok.RefreshToken
 	}
 	return out, nil
+}
+
+// refreshLocked refreshes and persists o.token while o.mu is held.
+func (o *OAuth) refreshLocked(ctx context.Context) error {
+	if o.token == nil || o.token.RefreshToken == "" {
+		return fmt.Errorf("%w: refresh token is missing", ErrReauthorizationRequired)
+	}
+
+	refreshed, err := o.refreshToken(ctx, o.token)
+	if err != nil {
+		return err
+	}
+	o.token = refreshed
+
+	path, err := o.tokenPath()
+	if err != nil {
+		return err
+	}
+	if err := saveTokenToPath(path, refreshed); err != nil {
+		return fmt.Errorf("oauth: persist refreshed token: %w", err)
+	}
+	return nil
 }
 
 func (o *OAuth) authorizeFlow(ctx context.Context) (*oauthToken, error) {

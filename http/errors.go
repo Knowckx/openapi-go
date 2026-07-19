@@ -4,6 +4,8 @@ import (
 	"fmt"
 )
 
+const tokenVerificationFailedCode = 401102
+
 type ApiError struct {
 	HttpStatus int
 	Code       int

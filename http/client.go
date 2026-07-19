@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	nhttp "net/http"
-	"time"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/go-querystring/query"
 
@@ -134,11 +135,16 @@ func (c *Client) GetOTPV2(ctx context.Context, ropts ...RequestOption) (string, 
 
 // Call will send request with signature to http server
 func (c *Client) Call(ctx context.Context, method, path string, queryParams interface{}, body interface{}, resp interface{}, ropts ...RequestOption) (err error) {
+	return c.call(ctx, method, path, queryParams, body, resp, true, ropts...)
+}
+
+func (c *Client) call(ctx context.Context, method, path string, queryParams interface{}, body interface{}, resp interface{}, allowOAuthRetry bool, ropts ...RequestOption) (err error) {
 	var (
-		br       io.Reader
-		bb       []byte
-		httpResp *nhttp.Response
-		rb       []byte
+		br                  io.Reader
+		bb                  []byte
+		httpResp            *nhttp.Response
+		rb                  []byte
+		rejectedAccessToken string
 	)
 
 	ro := &RequestOptions{}
@@ -172,6 +178,7 @@ func (c *Client) Call(ctx context.Context, method, path string, queryParams inte
 		if err != nil {
 			return err
 		}
+		rejectedAccessToken = token
 		// Derive DC region from the token prefix ("us_" → US, otherwise AP),
 		// then strip the prefix so only the bare token is sent to the gateway.
 		region = dcRegionFromCredential(token)
@@ -243,7 +250,15 @@ func (c *Client) Call(ctx context.Context, method, path string, queryParams inte
 	}
 
 	if httpResp.StatusCode != nhttp.StatusOK || apiResp.Code != 0 {
-		return NewError(httpResp.StatusCode, apiResp)
+		apiErr := NewError(httpResp.StatusCode, apiResp)
+		if allowOAuthRetry && apiResp.Code == tokenVerificationFailedCode && c.opts.OAuthClient != nil {
+			_ = httpResp.Body.Close()
+			if err := c.opts.OAuthClient.RefreshIfCurrent(ctx, rejectedAccessToken); err != nil {
+				return errors.Join(apiErr, fmt.Errorf("oauth: refresh after token rejection: %w", err))
+			}
+			return c.call(ctx, method, path, queryParams, body, resp, false, ropts...)
+		}
+		return apiErr
 	}
 
 	if resp == nil {
