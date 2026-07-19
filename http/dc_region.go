@@ -84,12 +84,11 @@ func (e *RegionRestrictedError) Error() string {
 	)
 }
 
-// stripBearerPrefix strips any leading "Bearer " from a credential.
-//
-// Region prefixes (hk_m_, us_m_, ap_m_, …) are routing metadata consumed by
-// dcRegionFromCredential to derive the x-dc-region header. The gateway
-// accepts the full prefixed token and routes by the header, so no region
-// prefix is stripped — only "Bearer " is removed.
-func stripBearerPrefix(credential string) string {
-	return strings.TrimPrefix(credential, "Bearer ")
+// stripRegionPrefix removes the transport-only Bearer and data-center prefixes
+// from a credential. Callers must derive the region before stripping it.
+func stripRegionPrefix(credential string) string {
+	credential = strings.TrimPrefix(credential, "Bearer ")
+	credential = strings.TrimPrefix(credential, "us_")
+	credential = strings.TrimPrefix(credential, "ap_")
+	return credential
 }

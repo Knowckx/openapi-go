@@ -183,13 +183,13 @@ func (c *Client) call(ctx context.Context, method, path string, queryParams inte
 		// then strip the prefix so only the bare token is sent to the gateway.
 		region = dcRegionFromCredential(token)
 		appKey = c.opts.OAuthClient.ClientID()
-		accessToken = "Bearer " + stripBearerPrefix(token)
+		accessToken = "Bearer " + stripRegionPrefix(token)
 		appSecret = ""
 	} else {
 		// API-key auth: any of the three credentials may carry the region prefix.
 		region = dcRegionFromCredentials(appKey, appSecret, accessToken)
-		accessToken = stripBearerPrefix(accessToken)
-		appKey = stripBearerPrefix(appKey)
+		accessToken = stripRegionPrefix(accessToken)
+		appKey = stripRegionPrefix(appKey)
 	}
 
 	// set headers

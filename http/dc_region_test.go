@@ -1,6 +1,11 @@
 package http
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestDcRegionFromCredential(t *testing.T) {
 	tests := []struct {
@@ -45,24 +50,63 @@ func TestDcRegionAsStr(t *testing.T) {
 	}
 }
 
-func TestStripBearerPrefix(t *testing.T) {
-	// Region prefixes are kept as-is; only "Bearer " is stripped.
+func TestStripRegionPrefix(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
 	}{
-		{"us_m_eyJabc", "us_m_eyJabc"},
-		{"hk_m_eyJabc", "hk_m_eyJabc"},
-		{"ap_m_eyJabc", "ap_m_eyJabc"},
-		{"eyJabc", "eyJabc"},
-		{"Bearer us_m_eyJabc", "us_m_eyJabc"},
-		{"Bearer hk_m_eyJabc", "hk_m_eyJabc"},
-		{"Bearer eyJabc", "eyJabc"},
+		{"ap_token", "token"},
+		{"us_token", "token"},
+		{"token", "token"},
+		{"Bearer ap_token", "token"},
 	}
 	for _, tc := range tests {
-		got := stripBearerPrefix(tc.input)
+		got := stripRegionPrefix(tc.input)
 		if got != tc.want {
-			t.Errorf("stripBearerPrefix(%q) = %q, want %q", tc.input, got, tc.want)
+			t.Errorf("stripRegionPrefix(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestClientCallStripsRegionPrefixFromAuthorization(t *testing.T) {
+	tests := []struct {
+		name        string
+		accessToken string
+		appKey      string
+		wantToken   string
+		wantRegion  string
+	}{
+		{"ap token", "ap_token", "ap_key", "token", "ap"},
+		{"us token", "us_token", "us_key", "token", "us"},
+		{"unprefixed token", "token", "key", "token", "ap"},
+		{"bearer ap token", "Bearer ap_token", "ap_key", "token", "ap"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get("Authorization"); got != tc.wantToken {
+					t.Errorf("Authorization = %q, want %q", got, tc.wantToken)
+				}
+				if got := r.Header.Get(dcRegionHeader); got != tc.wantRegion {
+					t.Errorf("%s = %q, want %q", dcRegionHeader, got, tc.wantRegion)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"code":0}`))
+			}))
+			defer server.Close()
+
+			client, err := New(
+				WithURL(server.URL),
+				WithAccessToken(tc.accessToken),
+				WithAppKey(tc.appKey),
+				WithAppSecret("secret"),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := client.Get(context.Background(), "/v1/test", nil, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

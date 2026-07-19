@@ -30,7 +30,7 @@ func TestClientCall_RetriesOnceAfterOAuthTokenRejection(t *testing.T) {
 			_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":7200,"token_type":"Bearer"}`))
 		case "/v1/test":
 			apiCalls++
-			if r.Header.Get("authorization") == "Bearer old-access" {
+			if r.Header.Get("authorization") == "Bearer old-access" && r.Header.Get(dcRegionHeader) == "ap" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"code":401102,"message":"token verification failed"}`))
 				return
@@ -46,7 +46,7 @@ func TestClientCall_RetriesOnceAfterOAuthTokenRejection(t *testing.T) {
 	tokenPath := filepath.Join(home, ".longbridge", "openapi", "tokens", clientID)
 	assert.NoError(t, os.MkdirAll(filepath.Dir(tokenPath), 0700))
 	tokenData, err := json.Marshal(map[string]interface{}{
-		"access_token":  "old-access",
+		"access_token":  "ap_old-access",
 		"refresh_token": "old-refresh",
 		"expires_at":    time.Now().Add(2 * time.Hour).Unix(),
 	})
@@ -91,7 +91,7 @@ func TestClientCall_DoesNotRetryTokenRejectionMoreThanOnce(t *testing.T) {
 	tokenPath := filepath.Join(home, ".longbridge", "openapi", "tokens", clientID)
 	assert.NoError(t, os.MkdirAll(filepath.Dir(tokenPath), 0700))
 	tokenData, err := json.Marshal(map[string]interface{}{
-		"access_token":  "old-access",
+		"access_token":  "ap_old-access",
 		"refresh_token": "old-refresh",
 		"expires_at":    time.Now().Add(2 * time.Hour).Unix(),
 	})
